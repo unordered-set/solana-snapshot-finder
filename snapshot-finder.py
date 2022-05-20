@@ -218,7 +218,7 @@ def get_snapshot_slot(rpc_address: str):
                     "snapshot_address": rpc_address,
                     "slots_diff": slots_diff,
                     "latency": r.elapsed.total_seconds() * 1000,
-                    "files_to_download": [r.headers["location"], r2.headers['location']],
+                    "files_to_download": [r2.headers["location"], "/incremental-snapshot.tar.bz2"],
                     "cost": (AVERAGE_SNAPSHOT_FILE_SIZE_MB + AVERAGE_INCREMENT_FILE_SIZE_MB) / MIN_DOWNLOAD_SPEED_MB + slots_diff / AVERAGE_CATCHUP_SPEED
                 })
                 return
@@ -250,6 +250,11 @@ def get_snapshot_slot(rpc_address: str):
 
 def download(url: str):
     actual_name = url[url.rfind('/'):]
+    r = do_request(url_=url, method_='head', timeout_=1)
+    if 'location' in str(r.headers):
+        location = r.headers['location']
+        actual_name = location[location.rfind('/'):]
+
     fname = f'{SNAPSHOT_PATH}{actual_name}'
     resp = requests.get(url, stream=True)
     total = int(resp.headers.get('content-length', 0))
@@ -294,7 +299,7 @@ def main_worker():
                      f'- {args.max_snapshot_age=}')
 
         # sort list of rpc node by SORT_ORDER (latency)
-        rpc_nodes_sorted = sorted(json_data["rpc_nodes"], key=lambda k: k[SORT_ORDER])
+        rpc_nodes_sorted = sorted(json_data["rpc_nodes"], key=lambda k: k["cost"] + (0 if k["latency"] < 50 else 1000000))
 
         json_data.update({
             "last_update_at": time.time(),
