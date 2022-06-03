@@ -48,13 +48,13 @@ NUM_OF_MAX_ATTEMPTS = args.num_of_retries
 SLEEP_BEFORE_RETRY = args.sleep
 NUM_OF_ATTEMPTS = 1
 SORT_ORDER = args.sort_order
-AVERAGE_SNAPSHOT_FILE_SIZE_MB = 2500.0
-AVERAGE_INCREMENT_FILE_SIZE_MB = 200.0
+AVERAGE_SNAPSHOT_FILE_SIZE_MB = 25000.0
+AVERAGE_INCREMENT_FILE_SIZE_MB = 1000.0
 AVERAGE_CATCHUP_SPEED = 2.0
 FULL_LOCAL_SNAP_SLOT = 0
+DO_NOTHING_LOCAL_SLOT_DIFF = 2300
 
 current_slot = 0
-FULL_LOCAL_SNAPSHOTS = []
 # skip servers that do not fit the filters so as not to check them again
 unsuitable_servers = set()
 
@@ -270,7 +270,7 @@ def download(url: str):
             bar.update(size)
 
 
-def main_worker():
+def main_worker(current_slot):
     try:
         global FULL_LOCAL_SNAP_SLOT
         rpc_nodes = list(set(get_all_rpc_ips()))
@@ -278,13 +278,24 @@ def main_worker():
         pbar = tqdm(total=len(rpc_nodes))
         print(f'RPC servers in total: {len(rpc_nodes)} \nCurrent slot number: {current_slot}\n')
 
+        all_local_snapshots = glob.glob(f'{SNAPSHOT_PATH}/*snapshot-*tar*')
+        best_local_slot = 0
+        for snapshot_path in all_local_snapshots:
+            snapshot_name = os.path.basename(snapshot_path)
+            if snapshot_name.startswith('snapshot-'):
+                best_local_slot = max(best_local_slot, int(snapshot_name.split('-')[1]))
+            elif snapshot_name.startswith('incremental-snapshot-'):
+                best_local_slot = max(best_local_slot, int(snapshot_name.split('-')[3]))
+        if current_slot - best_local_slot < DO_NOTHING_LOCAL_SLOT_DIFF:
+            print(f"Local snapshot for slot {best_local_slot} exists, which is less than {DO_NOTHING_LOCAL_SLOT_DIFF} older than {current_slot=}")
+            return 0
+
         # Search for full local snapshots.
         # If such a snapshot is found and it is not too old, then the script will try to find and download an incremental snapshot
         FULL_LOCAL_SNAPSHOTS = glob.glob(f'{SNAPSHOT_PATH}/snapshot-*tar*')
         if len(FULL_LOCAL_SNAPSHOTS) > 0:
-            FULL_LOCAL_SNAPSHOTS.sort(reverse=False)
-            FULL_LOCAL_SNAP_SLOT = FULL_LOCAL_SNAPSHOTS[0].replace(SNAPSHOT_PATH, "").split("-")[1]
-            print(f'Found full local snapshot {FULL_LOCAL_SNAPSHOTS[0]} | {FULL_LOCAL_SNAP_SLOT=}')
+            FULL_LOCAL_SNAP_SLOT = max(FULL_LOCAL_SNAPSHOTS).replace(SNAPSHOT_PATH, "").split("-")[1]
+            print(f'Found full local snapshot {max(FULL_LOCAL_SNAPSHOTS)} | {FULL_LOCAL_SNAP_SLOT=}')
 
         else:
             print(f'Can\'t find any full local snapshots in this path {SNAPSHOT_PATH} --> the search will be carried out on full snapshots')
@@ -365,7 +376,7 @@ while NUM_OF_ATTEMPTS <= NUM_OF_MAX_ATTEMPTS:
     current_slot = get_current_slot()
     print(f'Attempt number: {NUM_OF_ATTEMPTS}. Total attempts: {NUM_OF_MAX_ATTEMPTS}')
     NUM_OF_ATTEMPTS += 1
-    worker_result = main_worker()
+    worker_result = main_worker(current_slot)
 
     if worker_result == 0:
         print("Done")
